@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment or .env file."""
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        env_file=[str(BASE_DIR / ".env.local"), str(BASE_DIR / ".env")],
         env_file_encoding="utf-8",
         extra="ignore"
     )

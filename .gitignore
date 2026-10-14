@@ -37,6 +37,7 @@ backend/venv/
 .env
 backend/.env
 *.local
+.neon/
 
 # Telegram Sessions (CRITICAL: NEVER COMMIT TELEGRAM AUTH SESSIONS)
 *.session
