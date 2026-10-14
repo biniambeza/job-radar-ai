@@ -1,10 +1,12 @@
 import re
 import logging
+import asyncio
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Job
 from app.services.deduplicator import check_is_duplicate, record_job_hash
 from app.services.ai_matcher import evaluate_job_post, JobMatchResult
+from app.services.notifier import send_job_alert
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,18 @@ def fast_pre_filter(text: str) -> bool:
     matches = JOB_INDICATORS_REGEX.findall(text)
     return len(matches) >= 2
 
+def _dispatch_alert_safely(payload: dict):
+    """Safely fire and forget Telegram push notification regardless of event loop state."""
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(send_job_alert(payload))
+        except RuntimeError:
+            # No running event loop in current thread
+            asyncio.run(send_job_alert(payload))
+    except Exception as e:
+        logger.error(f"Error dispatching Telegram alert: {e}")
+
 def process_job_pipeline(
     db: Session,
     raw_text: str,
@@ -51,7 +65,8 @@ def process_job_pipeline(
     3. Gemini AI structured matching & scoring against resume.md
     4. Composite company:title deduplication
     5. Save qualified listings (>= 50%) to Neon PostgreSQL
-    6. Return decision (saved, alert, duplicate, discarded)
+    6. Dispatch instant Telegram push alert if score >= 75%
+    7. Return decision (saved, alert, duplicate, discarded)
     """
     # 1. Fast regex pre-filter
     if not fast_pre_filter(raw_text):
@@ -149,15 +164,24 @@ def process_job_pipeline(
     # Determine if this warrants an instant push alert (>= 75%)
     should_alert = match_result.match_score >= settings.INSTANT_ALERT_THRESHOLD
 
-    return {
+    result_payload = {
         "status": "saved",
         "job_id": job.id,
         "title": job.title,
         "company": job.company,
+        "location": job.location,
+        "location_type": job.location_type,
         "match_score": job.match_score,
         "should_alert": should_alert,
         "matching_skills": job.matching_skills,
         "missing_skills": job.missing_skills,
         "apply_link": job.apply_link,
-        "summary": job.summary
+        "summary": job.summary,
+        "source": job.source
     }
+
+    # 8. Dispatch Telegram alert if high score
+    if should_alert:
+        _dispatch_alert_safely(result_payload)
+
+    return result_payload
