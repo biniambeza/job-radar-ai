@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     # Resume File Path
     RESUME_PATH: str = str(Path(__file__).resolve().parent / "data" / "resume.md")
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        if not v:
+            return "sqlite:///./jobradar.db"
+        # Fix legacy postgres:// prefix from cloud providers (e.g. Neon, Render, Heroku)
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://"):]
+        # Ensure Neon connections require SSL if hosted on neon.tech
+        if "neon.tech" in v and "sslmode" not in v:
+            separator = "&" if "?" in v else "?"
+            v = f"{v}{separator}sslmode=require"
+        return v
+
     @field_validator("TG_TARGET_CHANNELS", "LINKEDIN_SEARCH_TERMS", mode="before")
     @classmethod
     def parse_comma_separated_list(cls, v):
